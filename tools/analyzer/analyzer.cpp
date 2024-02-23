@@ -33,7 +33,7 @@
 #include <unordered_set>
 #include <queue>
 #include <vector>
-#include "KnownBits.h"
+//#include "KnownBits.h"
 #include "mlir/Analysis/DataFlow/IntegerRangeAnalysis.h"
 #include "mlir/Analysis/DataFlow/ConstantPropagationAnalysis.h"
 #include "mlir/Analysis/DataFlow/DeadCodeAnalysis.h"
@@ -54,6 +54,11 @@ llvm::cl::opt<bool>
                 llvm::cl::Hidden, llvm::cl::init(false),
                 llvm::cl::cat(MLIR_MUTATE_CAT));
 
+llvm::cl::opt<string>
+    arg_output("o", llvm::cl::desc("Output file name"),
+                llvm::cl::Hidden, llvm::cl::init(""),
+                llvm::cl::cat(MLIR_MUTATE_CAT));
+
 // Defined in the test directory, no public header.
 namespace circt {
 namespace test {
@@ -67,38 +72,8 @@ bool isValidInputPath(), isComb(mlir::Operation *op);
 void visit(mlir::Operation *op, std::vector<mlir::Operation *> &tmp,
            std::unordered_set<mlir::Operation *> &visited);
 
-std::string toString(const KnownBits& kb){
-  string res;
-  res.resize(kb.getBitWidth());
-  for(size_t i=0;i<res.size();++i){
-    unsigned N = res.size() - i - 1;
-    if(kb.Zero[N]&&kb.One[N]){
-      res[i]='!';
-    }else if(kb.Zero[N]){
-      res[i]='0';
-    }else if(kb.One[N]){
-      res[i]='1';
-    }else{
-      res[i]='?';
-    }
-  }
-  return res;
-}
 
-
-long long getSize(const llvm::KnownBits& kb){
-  return kb.Zero.getBitWidth();
-}
-
-long long getUnknownSize(const llvm::KnownBits& kb){
-  unsigned sz=kb.Zero.getBitWidth(),result=0;
-  for(unsigned i=0;i<sz;++i){
-    if(!kb.Zero[i]&&!kb.One[i]){
-      ++result;
-    }
-  }
-  return result;
-}
+extern std::pair<long long,long long> analyzeModule(ModuleOp m);
 
 int main(int argc, char *argv[]) {
   llvm::sys::PrintStackTraceOnErrorSignal(argv[0]);
@@ -154,107 +129,15 @@ int main(int argc, char *argv[]) {
   src_sourceMgr.AddNewSourceBuffer(move(src_file), llvm::SMLoc());
   auto ir_before = parseSourceFile<ModuleOp>(src_sourceMgr, parserConfig);
   ModuleOp moduleOp=ir_before.release();
-
-  for(auto& op:moduleOp.getBodyRegion().front().getOperations()){
-    if(auto funcOp=llvm::dyn_cast<func::FuncOp>(op);!funcOp.isDeclaration()){
-
-      DataFlowSolver solver;
-      //dataflow::IntegerRangeAnalysis* analysis=solver.load<dataflow::IntegerRangeAnalysis>();
-      KnownBitsRangeAnalysis* knownBitsRangeAnalysis=solver.load<KnownBitsRangeAnalysis>();
-      //dataflow::SparseConstantPropagation* analysis=solver.load<dataflow::SparseConstantPropagation>();
-      LogicalResult result=solver.initializeAndRun(funcOp);
-
-      //auto tmp=solver.lookupState<dataflow::Executable>(ProgramPoint(&funcOp.getBody().front()));
-      //((dataflow::Executable*)tmp)->setToLive();
-      funcOp->walk([&](Operation* op){
-        auto tmp=solver.lookupState<dataflow::Executable>(ProgramPoint(op->getBlock()));
-        if(tmp){
-          ((dataflow::Executable*)tmp)->setToLive();
-        }
-      });
-      funcOp->walk([&](Operation* op){
-        auto res=knownBitsRangeAnalysis->visit(ProgramPoint(op));
-        //if(res.failed()){
-        //    llvm::errs()<<"Error\n";
-        //}
-        //auto res=analysis->visit(ProgramPoint(op));
-        if(res.failed()){
-          llvm::errs()<<"Error\n";
-        }
-      });
-      if(result.succeeded()){
-        /*
-        llvm::errs()<<"Success "<<solver.analysisStates.size()<<"\n";
-        auto opit=funcOp->getBlock()->getOperations().begin();
-        for(auto it=solver.analysisStates.begin();it!=solver.analysisStates.end();++it){
-            it->first.first.print(llvm::errs());
-            llvm::errs()<<"\n";
-            //opit->print(llvm::errs());
-            //llvm::errs()<<"\n";
-            llvm::errs()<<"\n";
-            it->second->print(llvm::errs());
-            llvm::errs()<<"\n";
-            llvm::errs()<<(it->first.second==TypeID::get<dataflow::IntegerValueRangeLattice>());
-            llvm::errs()<<"\n";
-        }*/
-        //llvm::errs()<<"Check args\n";
-        for(auto it=funcOp.args_begin();it!=funcOp.args_end();++it){
-          ProgramPoint point(*it);
-          //point.print(llvm::errs());
-          //llvm::errs()<<"\n";
-          //auto res=solver.lookupState<dataflow::IntegerValueRangeLattice>(point);
-          auto res=solver.lookupState<KnownBitsRangeLattice>(point);
-          if(res!=nullptr){
-            //llvm::errs()<<"Known Bits: ";
-            //res->print(llvm::errs());
-            //llvm::errs()<<"\n";
-          }else {
-            llvm::errs() << res << "\n";
-          }
-
-        }
-        long long totalSize=0,totalUnknown=0;
-        funcOp->walk([&](Operation* op){
-          if(op->getNumResults()==0){
-            return;
-          }
-          ProgramPoint point(op->getResult(0));
-          //auto intRes=solver.lookupState<dataflow::IntegerValueRangeLattice>(point);
-          auto res=solver.lookupState<KnownBitsRangeLattice>(point);
-          bool debug= true;
-          if(debug||llvm::isa<circt::comb::ICmpOp>(op)){
-            //point.print(llvm::errs());
-            //llvm::errs()<<"\n";
-          }
-          if(res!=nullptr){
-            std::string resStr=toString(res->getValue().getValue());
-            Twine tmpTwine(resStr);
-            StringAttr kb=StringAttr::get(&context, tmpTwine);
-            op->setAttr("kb", kb);
-            if(debug||llvm::isa<circt::comb::ICmpOp>(op)) {
-              //llvm::errs()<<"Known Bits: ";
-              //res->print(llvm::errs());
-              //llvm::errs()<<"\n";
-            }
-            if(isComb(op)){
-              totalSize+= getSize(res->getValue().getValue());
-              totalUnknown+= getUnknownSize(res->getValue().getValue());
-            }
-          }else{
-            llvm::errs()<<res<<"\n";
-          }
-          //intRes->dump();
-          //llvm::errs()<<"\n";
-          //auto it = solver.analysisStates.find({ProgramPoint(op), TypeID::get<dataflow::IntegerValueRangeLattice>()});
-
-        });
-        llvm::errs()<<totalSize<<' '<<totalUnknown<<' '<<filename_src<<"\n";
-      }else{
-        llvm::errs()<<"obtaining result failed\n";
-      }
-    }
+  auto res= analyzeModule(moduleOp);
+  llvm::errs()<<std::get<0>(res)<<' '<<std::get<1>(res)<<" "<<filename_src<<"\n";
+  if(!arg_output.empty()){
+    std::error_code EC;
+    llvm::raw_fd_ostream outs(arg_output, EC);
+    moduleOp.print(outs);
+    outs.close();
   }
-  //moduleOp.print(llvm::errs());
+
 
 
   /*

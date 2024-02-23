@@ -4,7 +4,6 @@ set(LLVM_LINK_COMPONENTS
 
 add_circt_tool(analyzer
         analyzer.cpp
-        KnownBits.cpp
 
   DEPENDS
   SUPPORT_PLUGINS
