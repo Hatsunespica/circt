@@ -15,6 +15,7 @@
 #include "llvm/ADT/SmallBitVector.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/KnownBits.h"
+#include "KnownBits.h"
 
 using namespace mlir;
 using namespace circt;
@@ -34,6 +35,23 @@ static bool hasOperandsOutsideOfBlock(Operation *op) {
   return llvm::any_of(op->getOperands(), [&](Value operand) {
     return operand.getParentBlock() != thisBlock;
   });
+static KnownBits fromString(std::string str){
+  KnownBits res(str.size());
+  for(size_t i=0;i<str.size();++i){
+    unsigned N=str.size()-i-1;
+    if(str[i]=='0'){
+      res.Zero.setBit(N);
+    }else if(str[i]=='1'){
+      res.One.setBit(N);
+    }else if(str[i]=='?'){
+
+    }else if(str[i]=='!'){
+      assert(false && "conflict in kb str");
+    }else{
+      assert(false && "invalid char in kb str");
+    }
+  }
+  return res;
 }
 
 /// Create a new instance of a generic operation that only has value operands,
@@ -616,17 +634,34 @@ LogicalResult ExtractOp::canonicalize(ExtractOp op, PatternRewriter &rewriter) {
 
   // This turns out to be incredibly expensive.  Disable until performance is
   // addressed.
-#if 0
+//#if 0
   // If the extracted bits are all known, then return the result.
-  auto knownBits = computeKnownBits(op.getInput())
-                       .extractBits(op.getType().cast<IntegerType>().getWidth(),
-                                    op.getLowBit());
+  bool useAnalysis=true;
+  KnownBits knownBits;
+  if(useAnalysis){
+    if(!op->hasAttr("kb")){
+      Operation* parentOp=op->getParentOp();
+      while(!llvm::isa<ModuleOp>(parentOp)){
+        parentOp= parentOp->getParentOp();
+      }
+      ModuleOp moduleOp=llvm::dyn_cast<ModuleOp>(parentOp);
+      analyzeModule(moduleOp);
+    }
+    StringAttr attr = op->getAttr("kb").cast<StringAttr>();
+    knownBits=fromString(attr.getValue().str());
+  }else{
+    auto knownBits = computeKnownBits(op.getInput())
+                         .extractBits(op.getType().cast<IntegerType>().getWidth(),
+                                      op.getLowBit());
+  }
+
   if (knownBits.isConstant()) {
+    llvm::errs()<<"KB triggered\n";
     replaceOpWithNewOpAndCopyName<hw::ConstantOp>(rewriter, op,
                                                   knownBits.getConstant());
     return success();
   }
-#endif
+//#endif
 
   // extract(olo, extract(ilo, x)) = extract(olo + ilo, x)
   if (auto innerExtract = dyn_cast_or_null<ExtractOp>(inputOp)) {
@@ -2968,6 +3003,7 @@ static void combineEqualityICmpWithKnownBitsAndConstant(
     ICmpOp cmpOp, const KnownBits &bitAnalysis, const APInt &rhsCst,
     PatternRewriter &rewriter) {
 
+  llvm::errs()<<"KB triggered!\n";
   // If any of the known bits disagree with any of the comparison bits, then
   // we can constant fold this comparison right away.
   APInt bitsKnown = bitAnalysis.Zero | bitAnalysis.One;
@@ -3258,7 +3294,6 @@ LogicalResult ICmpOp::canonicalize(ICmpOp op, PatternRewriter &rewriter) {
     case ICmpPredicate::wne:
       break;
     }
-
     // We have some specific optimizations for comparison with a constant that
     // are only supported for equality comparisons.
     if (op.getPredicate() == ICmpPredicate::eq ||
@@ -3266,11 +3301,34 @@ LogicalResult ICmpOp::canonicalize(ICmpOp op, PatternRewriter &rewriter) {
       // Simplify `icmp(value_with_known_bits, rhscst)` into some extracts
       // with a smaller constant.  We only support equality comparisons for
       // this.
-      auto knownBits = computeKnownBits(op.getLhs());
-      if (!knownBits.isUnknown())
-        return combineEqualityICmpWithKnownBitsAndConstant(op, knownBits, rhs,
-                                                           rewriter),
-               success();
+      bool useAnalysis=true;
+      if(useAnalysis){
+        mlir::Value lhs_val=op.getLhs();
+        if(mlir::Operation* lhsOp=lhs_val.getDefiningOp();lhsOp){
+          Operation* icmpOp=op.getOperation();
+          if(!lhsOp->hasAttr("kb")){
+            Operation* parentOp=icmpOp->getParentOp();
+            while(!llvm::isa<ModuleOp>(parentOp)){
+              parentOp= parentOp->getParentOp();
+            }
+            ModuleOp moduleOp=llvm::dyn_cast<ModuleOp>(parentOp);
+            analyzeModule(moduleOp);
+          }
+          StringAttr attr=lhsOp->getAttr("kb").cast<StringAttr>();
+          auto knownBits= fromString(attr.getValue().str());
+          if (!knownBits.isUnknown())
+            return combineEqualityICmpWithKnownBitsAndConstant(op, knownBits, rhs,
+                                                               rewriter),
+                   success();
+        }
+      }else{
+        auto knownBits = computeKnownBits(op.getLhs());
+        if (!knownBits.isUnknown())
+          return combineEqualityICmpWithKnownBitsAndConstant(op, knownBits, rhs,
+                                                             rewriter),
+                 success();
+      }
+
 
       // Simplify icmp eq(xor(a,b,cst1), cst2) -> icmp eq(xor(a,b),
       // cst1^cst2).
