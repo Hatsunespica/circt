@@ -34,6 +34,7 @@
 #include <queue>
 #include <vector>
 //#include "KnownBits.h"
+#include "llvm/Support/KnownBits.h"
 #include "mlir/Analysis/DataFlow/IntegerRangeAnalysis.h"
 #include "mlir/Analysis/DataFlow/ConstantPropagationAnalysis.h"
 #include "mlir/Analysis/DataFlow/DeadCodeAnalysis.h"
@@ -72,8 +73,41 @@ bool isValidInputPath(), isComb(mlir::Operation *op);
 void visit(mlir::Operation *op, std::vector<mlir::Operation *> &tmp,
            std::unordered_set<mlir::Operation *> &visited);
 
+static long long getSize(const llvm::KnownBits& kb){
+  return kb.Zero.getBitWidth();
+}
 
-extern std::pair<long long,long long> analyzeModule(ModuleOp m);
+static long long getUnknownSize(const llvm::KnownBits& kb){
+  unsigned sz=kb.Zero.getBitWidth(),result=0;
+  for(unsigned i=0;i<sz;++i){
+    if(!kb.Zero[i]&&!kb.One[i]){
+      ++result;
+    }
+  }
+  return result;
+}
+
+
+static std::string toString(const llvm::KnownBits& kb){
+  std::string res;
+  res.resize(kb.getBitWidth());
+  for(size_t i=0;i<res.size();++i){
+    unsigned N = res.size() - i - 1;
+    if(kb.Zero[N]&&kb.One[N]){
+      res[i]='!';
+    }else if(kb.Zero[N]){
+      res[i]='0';
+    }else if(kb.One[N]){
+      res[i]='1';
+    }else{
+      res[i]='?';
+    }
+  }
+  return res;
+}
+
+
+extern std::pair<long long,long long> analyzeModule(ModuleOp m,bool debug=false);
 
 int main(int argc, char *argv[]) {
   llvm::sys::PrintStackTraceOnErrorSignal(argv[0]);
@@ -129,7 +163,7 @@ int main(int argc, char *argv[]) {
   src_sourceMgr.AddNewSourceBuffer(move(src_file), llvm::SMLoc());
   auto ir_before = parseSourceFile<ModuleOp>(src_sourceMgr, parserConfig);
   ModuleOp moduleOp=ir_before.release();
-  auto res= analyzeModule(moduleOp);
+  auto res= analyzeModule(moduleOp,arg_verbose);
   llvm::errs()<<std::get<0>(res)<<' '<<std::get<1>(res)<<" "<<filename_src<<"\n";
   if(!arg_output.empty()){
     std::error_code EC;
@@ -137,7 +171,6 @@ int main(int argc, char *argv[]) {
     moduleOp.print(outs);
     outs.close();
   }
-
 
 
   /*
