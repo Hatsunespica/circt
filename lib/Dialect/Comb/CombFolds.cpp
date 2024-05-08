@@ -35,6 +35,8 @@ static bool hasOperandsOutsideOfBlock(Operation *op) {
   return llvm::any_of(op->getOperands(), [&](Value operand) {
     return operand.getParentBlock() != thisBlock;
   });
+}
+
 static KnownBits fromString(std::string str){
   KnownBits res(str.size());
   for(size_t i=0;i<str.size();++i){

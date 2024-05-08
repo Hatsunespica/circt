@@ -339,7 +339,7 @@ static std::string toString(const KnownBits& kb){
     return res;
 }
 
-std::pair<long long,long long> analyzeModule(ModuleOp moduleOp){
+std::pair<long long,long long> analyzeModule(ModuleOp moduleOp, bool debug){
     MLIRContext& context=*moduleOp.getContext();
     long long totalSize=0,totalUnknown=0;
     for(auto& op:moduleOp.getBodyRegion().front().getOperations()){
@@ -408,7 +408,6 @@ std::pair<long long,long long> analyzeModule(ModuleOp moduleOp){
                   ProgramPoint point(op->getResult(0));
                   //auto intRes=solver.lookupState<dataflow::IntegerValueRangeLattice>(point);
                   auto res=solver.lookupState<KnownBitsRangeLattice>(point);
-                  bool debug= false;
                   if(debug){
                     point.print(llvm::errs());
                     llvm::errs()<<"\n";

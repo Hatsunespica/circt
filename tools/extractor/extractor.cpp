@@ -238,11 +238,12 @@ int main(int argc, char *argv[]) {
     if (!bit->empty()) {
       for (auto iit = bit->begin(); iit != bit->end(); ++iit) {
         if (llvm::isa<circt::hw::HWModuleOp>(*iit)) {
-          iit->walk([&visited, &data, &tmp, &combOpCnt, &depth](mlir::Operation *op) {
+          int argDepth=depth;
+          iit->walk([&visited, &data, &tmp, &combOpCnt, &argDepth](mlir::Operation *op) {
             if (isComb(op)) {
               ++combOpCnt;
               if (visited.find(op) == visited.end()) {
-                visit(op, tmp, visited, depth);
+                visit(op, tmp, visited, argDepth);
               }
               //We also consider DAGs with 1 operations
               if (tmp.size()) {

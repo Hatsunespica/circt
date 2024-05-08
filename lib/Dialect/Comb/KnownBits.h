@@ -102,6 +102,6 @@ public:
                                  unsigned firstIndex) override;
 };
 
-std::pair<long long,long long> analyzeModule(ModuleOp m);
+std::pair<long long,long long> analyzeModule(ModuleOp m, bool debug=false);
 
 #endif //PLAYWITHLLVM_KNOWNBITS_H
