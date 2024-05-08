@@ -2,14 +2,14 @@ set(LLVM_LINK_COMPONENTS
   Support
 )
 
-add_circt_tool(extracter
-  extracter.cpp
+add_circt_tool(extractor
+  extractor.cpp
 
   DEPENDS
   SUPPORT_PLUGINS
 )
 llvm_update_compile_flags(circt-opt)
-target_link_libraries(extracter
+target_link_libraries(extractor
   PRIVATE
   CIRCTAffineToLoopSchedule
   CIRCTAnalysisTestPasses
@@ -69,6 +69,8 @@ target_link_libraries(extracter
   CIRCTSeq
   CIRCTSeqToSV
   CIRCTSeqTransforms
+  CIRCTSimToSV
+  CIRCTHWToBTOR2
   CIRCTSSP
   CIRCTSSPTransforms
   CIRCTCFToHandshake
@@ -100,4 +102,4 @@ target_link_libraries(extracter
   MLIRVectorDialect
 )
 
-export_executable_symbols_for_plugins(extracter)
+export_executable_symbols_for_plugins(extractor)
