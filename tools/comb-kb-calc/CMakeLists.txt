@@ -80,6 +80,8 @@ target_link_libraries(kbcalc
   CIRCTSV
   CIRCTSVTransforms
   CIRCTHWArith
+  CIRCTSimToSV
+  CIRCTHWToBTOR2
   CIRCTSystemC
   CIRCTSystemCTransforms
   CIRCTTransforms
