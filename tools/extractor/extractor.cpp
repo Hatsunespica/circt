@@ -364,7 +364,11 @@ int main(int argc, char *argv[]) {
       if(!std::filesystem::is_directory(destFolder)){
         std::filesystem::create_directory(destFolder);
       }
-      std::string outputFileName=destFolder.string()+to_string(i)+".mlir";
+      std::string outputFileName=destFolder.string();
+      if(outputFileName.back() != '/'){
+        outputFileName.push_back('/');
+      }
+      outputFileName+=to_string(i)+".mlir";
       llvm::raw_fd_ostream fout(outputFileName, ec);
       fout<<"// "<<result[i].second<<"\n";
       result[i].first.print(fout);
