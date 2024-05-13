@@ -1,3 +1,4 @@
+#include "circt/Dialect/Arc/ArcOps.h"
 #include "circt/Dialect/HW/HWOps.h"
 #include "circt/InitAllDialects.h"
 #include "circt/InitAllPasses.h"
@@ -28,12 +29,12 @@
 #include "llvm/Support/SourceMgr.h"
 #include <algorithm>
 #include <filesystem>
-#include <string>
-#include <unordered_set>
-#include <unordered_map>
-#include <queue>
-#include <vector>
 #include <iostream>
+#include <queue>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 using namespace std;
 using namespace mlir;
@@ -48,9 +49,9 @@ llvm::cl::opt<string> filename_src(llvm::cl::Positional,
                                    llvm::cl::cat(MLIR_MUTATE_CAT));
 
 llvm::cl::opt<string> output_folder("o",
-                               llvm::cl::desc("Specify output folder"),
-                                     llvm::cl::value_desc("folder name"),
-                                     llvm::cl::Optional);
+                                    llvm::cl::desc("Specify output folder"),
+                                    llvm::cl::value_desc("folder name"),
+                                    llvm::cl::Optional);
 llvm::cl::opt<bool>
     arg_verbose("verbose", llvm::cl::desc("Be verbose about what's going on"),
                 llvm::cl::Hidden, llvm::cl::init(false),
@@ -58,8 +59,7 @@ llvm::cl::opt<bool>
 
 llvm::cl::opt<int>
     depth("depth", llvm::cl::desc("Depth of search when performing slicing"),
-                llvm::cl::Hidden, llvm::cl::init(5),
-                llvm::cl::cat(MLIR_MUTATE_CAT));
+          llvm::cl::Hidden, llvm::cl::init(5), llvm::cl::cat(MLIR_MUTATE_CAT));
 
 // Defined in the test directory, no public header.
 namespace circt {
@@ -72,8 +72,6 @@ filesystem::path inputPath, outputPath;
 bool isValidInputPath(), isComb(mlir::Operation *op);
 void visit(mlir::Operation *op, std::vector<mlir::Operation *> &tmp,
            std::unordered_set<mlir::Operation *> &visited, int depth);
-
-
 
 mlir::BlockArgument addParameter(mlir::func::FuncOp &func, mlir::Type ty) {
   func.insertArgument(func.getNumArguments(), ty, {}, func->getLoc());
@@ -95,7 +93,6 @@ mlir::func::FuncOp moveToFunc(MLIRContext &context,
   auto func = builder.create<mlir::func::FuncOp>(loc, "tmp", funcTy);
   mlir::Block *blk = func.addEntryBlock();
 
-
   auto retOp = builder.create<mlir::func::ReturnOp>(func->getLoc());
   blk->push_back(retOp.getOperation());
 
@@ -104,9 +101,6 @@ mlir::func::FuncOp moveToFunc(MLIRContext &context,
   // arg_num -> current arg_num;
   unordered_map<int, mlir::BlockArgument> arg_um;
   std::vector<mlir::Operation *> stk;
-
-
-
 
   for (auto op : ops) {
     mlir::Operation *cur = op->clone();
@@ -151,7 +145,7 @@ mlir::func::FuncOp moveToFunc(MLIRContext &context,
   }
 
   for (auto op : needReturn) {
-    if(isComb(op)){
+    if (isComb(op)) {
       for (auto res_it = op->result_begin(); res_it != op->result_end();
            ++res_it) {
         addResult(func, *res_it);
@@ -166,8 +160,7 @@ mlir::func::FuncOp moveToFunc(MLIRContext &context,
   return func;
 }
 
-
-std::string funcToString(mlir::func::FuncOp func){
+std::string funcToString(mlir::func::FuncOp func) {
   std::string result;
   llvm::raw_string_ostream os(result);
   func.print(os);
@@ -231,26 +224,28 @@ int main(int argc, char *argv[]) {
   std::unordered_set<mlir::Operation *> visited;
   std::vector<mlir::Operation *> tmp;
   std::vector<std::vector<mlir::Operation *>> data;
-  int combOpCnt=0;
+  int combOpCnt = 0;
 
   for (auto bit = ir_before->getRegion().begin();
        bit != ir_before->getRegion().end(); ++bit) {
     if (!bit->empty()) {
       for (auto iit = bit->begin(); iit != bit->end(); ++iit) {
-        if (llvm::isa<circt::hw::HWModuleOp>(*iit)) {
-          int argDepth=depth;
-          iit->walk([&visited, &data, &tmp, &combOpCnt, &argDepth](mlir::Operation *op) {
+        if (llvm::isa<circt::hw::HWModuleOp>(*iit) ||
+            llvm::isa<circt::arc::DefineOp>(*iit)) {
+          int argDepth = depth;
+          iit->walk([&visited, &data, &tmp, &combOpCnt,
+                     &argDepth](mlir::Operation *op) {
             if (isComb(op)) {
               ++combOpCnt;
               if (visited.find(op) == visited.end()) {
                 visit(op, tmp, visited, argDepth);
               }
-              //We also consider DAGs with 1 operations
+              // We also consider DAGs with 1 operations
               if (tmp.size()) {
                 data.push_back(tmp);
               }
               tmp.clear();
-              //We clean visited to don't filter out operations
+              // We clean visited to don't filter out operations
               visited.clear();
             }
           });
@@ -258,8 +253,8 @@ int main(int argc, char *argv[]) {
       }
     }
   }
-  llvm::errs()<<"Sliced functions: " << data.size() << "\n";
-  llvm::errs()<<"Number of comb operations: "<<combOpCnt<<"\n";
+  llvm::errs() << "Sliced functions: " << data.size() << "\n";
+  llvm::errs() << "Number of comb operations: " << combOpCnt << "\n";
   std::vector<pair<int, std::vector<mlir::Operation *>>> v;
   for (const auto &ele : data) {
     v.push_back({ele.size(), ele});
@@ -285,25 +280,26 @@ int main(int argc, char *argv[]) {
   llvm::errs() << "======\n";
   llvm::errs() << "Size >= 2:" << i << "\n";*/
   std::vector<mlir::func::FuncOp> funcs;
-  for(size_t i=0;i<v.size();++i){
-    funcs.push_back(moveToFunc(context,v[i].second,ir_before->getLoc()));
+  for (size_t i = 0; i < v.size(); ++i) {
+    funcs.push_back(moveToFunc(context, v[i].second, ir_before->getLoc()));
   }
   std::unordered_map<std::string, std::pair<mlir::func::FuncOp, int>> filter;
-  for(int i=0;i<funcs.size();++i){
+  for (int i = 0; i < funcs.size(); ++i) {
     std::string str = funcToString(funcs[i]);
-    if(filter.find(str)==filter.end()){
+    if (filter.find(str) == filter.end()) {
       filter.insert(std::make_pair(str, std::make_pair(funcs[i], 0)));
     }
     filter[str].second++;
   }
   std::vector<std::pair<mlir::func::FuncOp, int>> result;
-  for(const auto& p:filter){
+  for (const auto &p : filter) {
     result.push_back(p.second);
   }
-  sort(result.begin(),result.end(), [](std::pair<mlir::func::FuncOp, int>& a,
-                                        std::pair<mlir::func::FuncOp, int>& b){
-    return a.second>b.second;
-  });
+  sort(result.begin(), result.end(),
+       [](std::pair<mlir::func::FuncOp, int> &a,
+          std::pair<mlir::func::FuncOp, int> &b) {
+         return a.second > b.second;
+       });
 
   /*
   funcs.back().dump();
@@ -350,40 +346,40 @@ int main(int argc, char *argv[]) {
     llvm::errs()<<x.first<<" ";
     llvm::errs()<<": "<<cnt[x.first]<<"\n";
   }*/
-  //funcs.front().dump();
-  llvm::errs()<<"Final result size: "<<result.size();
-  llvm::errs()<<"\n";
+  // funcs.front().dump();
+  llvm::errs() << "Final result size: " << result.size();
+  llvm::errs() << "\n";
 
-  if(!output_folder.empty()){
-    llvm::errs()<<"Start writing to files\n";
+  if (!output_folder.empty()) {
+    llvm::errs() << "Start writing to files\n";
 
-    auto destFolder=std::filesystem::path(std::string(output_folder));
+    auto destFolder = std::filesystem::path(std::string(output_folder));
 
-    for(size_t i=0;i<result.size();++i){
+    for (size_t i = 0; i < result.size(); ++i) {
       std::error_code ec;
-      if(!std::filesystem::is_directory(destFolder)){
+      if (!std::filesystem::is_directory(destFolder)) {
         std::filesystem::create_directory(destFolder);
       }
-      std::string outputFileName=destFolder.string();
-      if(outputFileName.back() != '/'){
+      std::string outputFileName = destFolder.string();
+      if (outputFileName.back() != '/') {
         outputFileName.push_back('/');
       }
-      outputFileName+=to_string(i)+".mlir";
+      outputFileName += to_string(i) + ".mlir";
       llvm::raw_fd_ostream fout(outputFileName, ec);
-      fout<<"// "<<result[i].second<<"\n";
+      fout << "// " << result[i].second << "\n";
       result[i].first.print(fout);
       fout.close();
       llvm::errs() << "file wrote to " << outputFileName << "\n";
     }
 
-    llvm::errs()<<"Writing files done\n";
+    llvm::errs() << "Writing files done\n";
   }
 
   int x;
-  while(cin>>x&&x!=-1){
-    if(x>result.size()){
-      llvm::errs()<<"out of range\n";
-    }else{
+  while (cin >> x && x != -1) {
+    if (x > result.size()) {
+      llvm::errs() << "out of range\n";
+    } else {
       result[x].first.dump();
     }
   }
@@ -420,12 +416,12 @@ bool isComb(mlir::Operation *op) {
 }
 
 void visit(mlir::Operation *op, std::vector<mlir::Operation *> &tmp,
-           std::unordered_set<mlir::Operation *> &visited,int depth) {
-  if(llvm::isa<circt::hw::ConstantOp>(op)){
+           std::unordered_set<mlir::Operation *> &visited, int depth) {
+  if (llvm::isa<circt::hw::ConstantOp>(op)) {
     tmp.push_back(op);
     return;
   }
-  if(depth==0){
+  if (depth == 0) {
     return;
   }
   if (!isComb(op)) {
@@ -435,7 +431,7 @@ void visit(mlir::Operation *op, std::vector<mlir::Operation *> &tmp,
     visited.insert(op);
     for (Value operand : op->getOperands()) {
       if (Operation *producer = operand.getDefiningOp()) {
-        visit(producer, tmp, visited, depth-1);
+        visit(producer, tmp, visited, depth - 1);
       }
     }
     tmp.push_back(op);
@@ -445,4 +441,3 @@ void visit(mlir::Operation *op, std::vector<mlir::Operation *> &tmp,
     }*/
   }
 }
-
