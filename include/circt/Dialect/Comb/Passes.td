@@ -22,4 +22,12 @@ def LowerComb : Pass<"lower-comb", "mlir::ModuleOp"> {
   }];
 }
 
+def DBTest : Pass<"db-test", "mlir::ModuleOp"> {
+  let summary = "Test db opt";
+  let description = [{
+    Test db opt
+  }];
+}
+
+
 #endif // CIRCT_DIALECT_COMB_PASSES_TD

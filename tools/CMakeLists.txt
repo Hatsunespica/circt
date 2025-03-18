@@ -20,6 +20,8 @@ if(CIRCT_SLANG_FRONTEND_ENABLED)
   add_subdirectory(circt-verilog)
 endif()
 add_subdirectory(extractor)
+add_subdirectory(extractor-opt)
 add_subdirectory(comb-kb-calc)
 add_subdirectory(analyzer)
+add_subdirectory(db-analyzer)
 

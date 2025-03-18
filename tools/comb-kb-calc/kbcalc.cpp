@@ -152,7 +152,7 @@ int main(int argc, char *argv[]) {
     totalSize+= getSize(kb);
     totalUnknown+= getUnknownSize(kb);
   }
-  llvm::errs()<<totalSize<<' '<<totalUnknown<<' '<<filename_src<<"\n";
+  llvm::errs()<<totalSize<<' '<<totalUnknown<<'\n';//<<filename_src<<"\n";
   return 0;
 }
 

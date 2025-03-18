@@ -261,7 +261,7 @@ getLowestBitAndHighestBitRequired(Operation *op, bool narrowTrailingBits,
     lowestBitRequired = 0;
     break;
   }
-
+  llvm::errs()<<(originalOpWidth - (highestBitRequired-lowestBitRequired+1))<<"\n";
   return {lowestBitRequired, highestBitRequired};
 }
 
@@ -636,9 +636,9 @@ LogicalResult ExtractOp::canonicalize(ExtractOp op, PatternRewriter &rewriter) {
 
   // This turns out to be incredibly expensive.  Disable until performance is
   // addressed.
-//#if 0
+#if 0
   // If the extracted bits are all known, then return the result.
-  bool useAnalysis=true;
+  bool useAnalysis=false;
   KnownBits knownBits;
   if(useAnalysis){
     if(!op->hasAttr("kb")){
@@ -663,7 +663,7 @@ LogicalResult ExtractOp::canonicalize(ExtractOp op, PatternRewriter &rewriter) {
                                                   knownBits.getConstant());
     return success();
   }
-//#endif
+#endif
 
   // extract(olo, extract(ilo, x)) = extract(olo + ilo, x)
   if (auto innerExtract = dyn_cast_or_null<ExtractOp>(inputOp)) {
@@ -1002,6 +1002,15 @@ LogicalResult AndOp::canonicalize(AndOp op, PatternRewriter &rewriter) {
   // Trivial and(x), and(x, x) cases are handled by [AndOp::fold] above.
   if (size > 2 && canonicalizeIdempotentInputs(op, rewriter))
     return success();
+
+  bool dumpAndTransfer=false;
+  if(dumpAndTransfer){
+    unsigned resultWidth = op.getType().getIntOrFloatBitWidth();
+    //replaceOpWithNewOpAndCopyName<hw::ConstantOp>(rewriter, op, op.getType(),{});
+    replaceOpWithNewOpAndCopyName<OrOp>(rewriter, op, op.getType(),
+                                        inputs, false);
+    return success();
+  }
 
   // Patterns for and with a constant on RHS.
   APInt value;
@@ -3303,7 +3312,7 @@ LogicalResult ICmpOp::canonicalize(ICmpOp op, PatternRewriter &rewriter) {
       // Simplify `icmp(value_with_known_bits, rhscst)` into some extracts
       // with a smaller constant.  We only support equality comparisons for
       // this.
-      bool useAnalysis=true;
+      bool useAnalysis=false;
       if(useAnalysis){
         mlir::Value lhs_val=op.getLhs();
         if(mlir::Operation* lhsOp=lhs_val.getDefiningOp();lhsOp){

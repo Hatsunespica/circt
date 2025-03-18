@@ -33,11 +33,13 @@
 #include <unordered_set>
 #include <queue>
 #include <vector>
+#include <iostream>
 //#include "KnownBits.h"
 #include "llvm/Support/KnownBits.h"
 #include "mlir/Analysis/DataFlow/IntegerRangeAnalysis.h"
 #include "mlir/Analysis/DataFlow/ConstantPropagationAnalysis.h"
 #include "mlir/Analysis/DataFlow/DeadCodeAnalysis.h"
+#include "DemandedBits.h"
 
 using namespace std;
 using namespace mlir;
@@ -52,6 +54,11 @@ llvm::cl::opt<string> filename_src(llvm::cl::Positional,
                                    llvm::cl::cat(MLIR_MUTATE_CAT));
 llvm::cl::opt<bool>
     arg_verbose("verbose", llvm::cl::desc("Be verbose about what's going on"),
+                llvm::cl::Hidden, llvm::cl::init(false),
+                llvm::cl::cat(MLIR_MUTATE_CAT));
+
+llvm::cl::opt<bool>
+    print_kb("print-kb", llvm::cl::desc("print kb result"),
                 llvm::cl::Hidden, llvm::cl::init(false),
                 llvm::cl::cat(MLIR_MUTATE_CAT));
 
@@ -87,24 +94,6 @@ static long long getUnknownSize(const llvm::KnownBits& kb){
   return result;
 }
 
-
-static std::string toString(const llvm::KnownBits& kb){
-  std::string res;
-  res.resize(kb.getBitWidth());
-  for(size_t i=0;i<res.size();++i){
-    unsigned N = res.size() - i - 1;
-    if(kb.Zero[N]&&kb.One[N]){
-      res[i]='!';
-    }else if(kb.Zero[N]){
-      res[i]='0';
-    }else if(kb.One[N]){
-      res[i]='1';
-    }else{
-      res[i]='?';
-    }
-  }
-  return res;
-}
 
 
 extern std::pair<long long,long long> analyzeModule(ModuleOp m,bool debug=false);
@@ -163,15 +152,74 @@ int main(int argc, char *argv[]) {
   src_sourceMgr.AddNewSourceBuffer(move(src_file), llvm::SMLoc());
   auto ir_before = parseSourceFile<ModuleOp>(src_sourceMgr, parserConfig);
   ModuleOp moduleOp=ir_before.release();
-
   auto res= analyzeModule(moduleOp,arg_verbose);
-  llvm::errs()<<std::get<0>(res)<<' '<<std::get<1>(res)<<" "<<filename_src<<"\n";
-    if(!arg_output.empty()){
+  std::vector<MLIRDemandedBits<mlir::func::FuncOp,mlir::func::ReturnOp>> v;
+  moduleOp.walk([&v](mlir::func::FuncOp op){
+    v.push_back(op);
+  });
+  //llvm::errs()<<v.size()<<"\n";
+  int x=0;
+  while(1){
+    int cnt=0;
+    v[x].performAnalysis();
+    v[x].getFunction()->walk([&v,&cnt,&x, &context](mlir::Operation* op){
+      if(isComb(op)) {
+        std::string tmpStr;
+        llvm::APInt db=v[x].getDemandedBits(op);
+        tmpStr.resize(db.getBitWidth());
+        for(size_t i=0;i<tmpStr.size();++i){
+          unsigned N = tmpStr.size() - i - 1;
+          if(db[N]){
+            tmpStr[i]='1';
+          }else{
+            tmpStr[i]='0';
+          }
+        }
+        Twine tmpTwine(tmpStr);
+        mlir::StringAttr dbAttr=mlir::StringAttr::get(&context, tmpTwine);
+        op->setAttr("db", dbAttr);
+        ++cnt;
+      }
+    });
+    unsigned ttl=0, none_use=0;
+    for(const auto& p:v[x].getAliveBits()){
+      if(isComb(p.first)){
+        std::string str=toString(p.second);
+        ttl+=str.size();
+        for(const char& x:str){
+          if(x=='0'){
+            ++none_use;
+          }
+        }
+      }
+    }
+    if(arg_verbose){
+      v[x].print();
+    }
+    //llvm::errs()<<"Total op: "<<cnt<<"\n";
+    //llvm::errs()<<"Total bits and none-use bits: "<<ttl<<' '<<none_use<<"\n";
+    if(print_kb){
+      llvm::errs()<<res.first<<' '<<res.second<<"\n";
+    }
+    llvm::errs()<<ttl<<' '<<none_use<<"\n";
+    break;
+  }
+  if(!arg_output.empty()){
     std::error_code EC;
     llvm::raw_fd_ostream outs(arg_output, EC);
     moduleOp.print(outs);
     outs.close();
   }
+  /*
+  auto res= analyzeModule(moduleOp,arg_verbose);
+  llvm::errs()<<std::get<0>(res)<<' '<<std::get<1>(res)<<" "<<filename_src<<"\n";
+  if(!arg_output.empty()){
+    std::error_code EC;
+    llvm::raw_fd_ostream outs(arg_output, EC);
+    moduleOp.print(outs);
+    outs.close();
+  }
+   */
 
 
   /*
@@ -232,8 +280,9 @@ int main(int argc, char *argv[]) {
   funcs[funcs.size()>>1].dump();
   llvm::errs() << "======\n";
   funcs[i].dump();
-  llvm::errs() << "======\n";*/
+  llvm::errs() << "======\n";
   //funcs.front().dump();
+*/
   return 0;
 }
 
@@ -277,7 +326,7 @@ void visit(mlir::Operation *op, std::vector<mlir::Operation *> &tmp,
   }
   if (visited.find(op) == visited.end()) {
     visited.insert(op);
-    for (Value operand : op->getOperands()) {
+    for (mlir::Value operand : op->getOperands()) {
       if (Operation *producer = operand.getDefiningOp()) {
         visit(producer, tmp, visited);
       }

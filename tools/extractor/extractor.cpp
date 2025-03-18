@@ -57,6 +57,21 @@ llvm::cl::opt<bool>
                 llvm::cl::Hidden, llvm::cl::init(false),
                 llvm::cl::cat(MLIR_MUTATE_CAT));
 
+llvm::cl::opt<bool>
+    remove_repetition("remove_repetition", llvm::cl::desc("Remove repetitions in the result"),
+                llvm::cl::Hidden, llvm::cl::init(false),
+                llvm::cl::cat(MLIR_MUTATE_CAT));
+
+llvm::cl::opt<bool>
+    slice_function("slice_function", llvm::cl::desc("Slice functions"),
+                      llvm::cl::Hidden, llvm::cl::init(false),
+                      llvm::cl::cat(MLIR_MUTATE_CAT));
+
+llvm::cl::opt<bool>
+    repl("repl", llvm::cl::desc("Checking results in a repl way"),
+                   llvm::cl::Hidden, llvm::cl::init(false),
+                   llvm::cl::cat(MLIR_MUTATE_CAT));
+
 llvm::cl::opt<int>
     depth("depth", llvm::cl::desc("Depth of search when performing slicing"),
           llvm::cl::Hidden, llvm::cl::init(5), llvm::cl::cat(MLIR_MUTATE_CAT));
@@ -72,6 +87,8 @@ filesystem::path inputPath, outputPath;
 bool isValidInputPath(), isComb(mlir::Operation *op);
 void visit(mlir::Operation *op, std::vector<mlir::Operation *> &tmp,
            std::unordered_set<mlir::Operation *> &visited, int depth);
+void visit(mlir::Operation *op, std::vector<mlir::Operation *> &tmp,
+           std::unordered_set<mlir::Operation *> &visited);
 
 mlir::BlockArgument addParameter(mlir::func::FuncOp &func, mlir::Type ty) {
   func.insertArgument(func.getNumArguments(), ty, {}, func->getLoc());
@@ -167,6 +184,8 @@ std::string funcToString(mlir::func::FuncOp func) {
   return os.str();
 }
 
+std::vector<std::vector<mlir::Operation*>> sliceFunctions(ModuleOp moduleOp), extractFunctions(ModuleOp moduleOp);
+
 int main(int argc, char *argv[]) {
   llvm::sys::PrintStackTraceOnErrorSignal(argv[0]);
   llvm::PrettyStackTraceProgram X(argc, argv);
@@ -220,133 +239,56 @@ int main(int argc, char *argv[]) {
   ParserConfig parserConfig(&context);
   src_sourceMgr.AddNewSourceBuffer(move(src_file), llvm::SMLoc());
   auto ir_before = parseSourceFile<ModuleOp>(src_sourceMgr, parserConfig);
+  ModuleOp moduleOp = ir_before.release();
 
-  std::unordered_set<mlir::Operation *> visited;
-  std::vector<mlir::Operation *> tmp;
-  std::vector<std::vector<mlir::Operation *>> data;
-  int combOpCnt = 0;
 
-  for (auto bit = ir_before->getRegion().begin();
-       bit != ir_before->getRegion().end(); ++bit) {
-    if (!bit->empty()) {
-      for (auto iit = bit->begin(); iit != bit->end(); ++iit) {
-        if (llvm::isa<circt::hw::HWModuleOp>(*iit) ||
-            llvm::isa<circt::arc::DefineOp>(*iit)) {
-          int argDepth = depth;
-          iit->walk([&visited, &data, &tmp, &combOpCnt,
-                     &argDepth](mlir::Operation *op) {
-            if (isComb(op)) {
-              ++combOpCnt;
-              if (visited.find(op) == visited.end()) {
-                visit(op, tmp, visited, argDepth);
-              }
-              // We also consider DAGs with 1 operations
-              if (tmp.size()) {
-                data.push_back(tmp);
-              }
-              tmp.clear();
-              // We clean visited to don't filter out operations
-              visited.clear();
-            }
-          });
-        }
-      }
-    }
+  std::vector<std::vector<mlir::Operation*>> data;
+  if(slice_function){
+    data=sliceFunctions(moduleOp);
+  }else{
+    data= extractFunctions(moduleOp);
   }
-  llvm::errs() << "Sliced functions: " << data.size() << "\n";
-  llvm::errs() << "Number of comb operations: " << combOpCnt << "\n";
-  std::vector<pair<int, std::vector<mlir::Operation *>>> v;
+
+
+  std::vector<pair<std::vector<mlir::Operation *>, int>> v;
   for (const auto &ele : data) {
-    v.push_back({ele.size(), ele});
+    v.push_back({ele, ele.size()});
   }
   std::sort(v.begin(), v.end(),
             [](auto &a, auto &b) { return a.first > b.first; });
-  llvm::errs() << "Max size: " << v[0].first << "\n";
-  llvm::errs() << "Min size: " << v.back().first << "\n";
-  /*
-  llvm::errs() << "=======\n";
-  for (const auto &x : v.back().second) {
-    x->dump();
-  }
-  llvm::errs() << "=======\n";
-  llvm::errs() << "Median size: " << v[v.size() / 2].first << "\n";
-  llvm::errs() << "=======\n";
-  for (const auto &x : v[v.size() / 2].second) {
-    x->dump();
-  }
-  int i = 0;
-  for (; i < v.size() && v[i].first > 2; ++i) {
-  }
-  llvm::errs() << "======\n";
-  llvm::errs() << "Size >= 2:" << i << "\n";*/
+
+  std::vector<std::pair<mlir::func::FuncOp, int>> result;
+
   std::vector<mlir::func::FuncOp> funcs;
   for (size_t i = 0; i < v.size(); ++i) {
-    funcs.push_back(moveToFunc(context, v[i].second, ir_before->getLoc()));
+    funcs.push_back(moveToFunc(context, v[i].first, moduleOp.getLoc()));
   }
-  std::unordered_map<std::string, std::pair<mlir::func::FuncOp, int>> filter;
-  for (int i = 0; i < funcs.size(); ++i) {
-    std::string str = funcToString(funcs[i]);
-    if (filter.find(str) == filter.end()) {
-      filter.insert(std::make_pair(str, std::make_pair(funcs[i], 0)));
+
+  if(remove_repetition){
+    std::unordered_map<std::string, std::pair<mlir::func::FuncOp, int>> filter;
+    for (int i = 0; i < funcs.size(); ++i) {
+      std::string str = funcToString(funcs[i]);
+      if (filter.find(str) == filter.end()) {
+        filter.insert(std::make_pair(str, std::make_pair(funcs[i], 0)));
+      }
+      filter[str].second++;
     }
-    filter[str].second++;
+    for (const auto &p : filter) {
+      result.push_back(p.second);
+    }
+  }else{
+    assert(funcs.size()==v.size());
+    for(int i=0;i<v.size();++i){
+      result.push_back({funcs[i], v[i].second});
+    }
   }
-  std::vector<std::pair<mlir::func::FuncOp, int>> result;
-  for (const auto &p : filter) {
-    result.push_back(p.second);
-  }
+
   sort(result.begin(), result.end(),
        [](std::pair<mlir::func::FuncOp, int> &a,
           std::pair<mlir::func::FuncOp, int> &b) {
          return a.second > b.second;
        });
 
-  /*
-  funcs.back().dump();
-  llvm::errs() << "======\n";
-  funcs[funcs.size()>>1].dump();
-  llvm::errs() << "======\n";
-  if(i<v.size()){
-    funcs[i].dump();
-    llvm::errs() << "======\n";
-  }else{
-    llvm::errs()<<"Cannot find a DAG with size larger than 2\n";
-  }
-  unordered_map<std::string,unordered_set<int>> um;
-  unordered_map<std::string, int> cnt;
-  unordered_map<int,int> pred;
-  for(size_t i=0;i<v.size();++i){
-    for(mlir::Operation* op:v[i].second){
-      std::string str=op->getName().getStringRef().str();
-      if(um.find(str)==um.end()){
-        um.insert({str,unordered_set<int>()});
-        cnt.insert({str,0});
-      }
-      if(llvm::isa<circt::comb::ICmpOp>(op)){
-        mlir::Attribute attr=op->getAttr("predicate");
-        int pred_val = attr.cast<mlir::IntegerAttr>().getValue().getZExtValue();
-        if(pred.find(pred_val)==pred.end()){
-          pred.insert({pred_val,0});
-        }
-        pred[pred_val]++;
-      }
-      um[str].insert(op->getNumOperands());
-      cnt[str]++;
-    }
-  }
-  */
-  /*
-  llvm::errs()<<"all ops: "<<um.size()<<"\n";
-  int sum=0;
-  for(const auto& x:um){
-    sum+=cnt[x.first];
-  }
-  llvm::errs()<<"All count: "<<sum<<"\n";
-  for(const auto& x:um){
-    llvm::errs()<<x.first<<" ";
-    llvm::errs()<<": "<<cnt[x.first]<<"\n";
-  }*/
-  // funcs.front().dump();
   llvm::errs() << "Final result size: " << result.size();
   llvm::errs() << "\n";
 
@@ -375,16 +317,92 @@ int main(int argc, char *argv[]) {
     llvm::errs() << "Writing files done\n";
   }
 
-  int x;
-  while (cin >> x && x != -1) {
-    if (x > result.size()) {
-      llvm::errs() << "out of range\n";
-    } else {
-      result[x].first.dump();
+  if(repl){
+    int x;
+    while (cin >> x && x != -1) {
+      if (x > result.size()) {
+        llvm::errs() << "out of range\n";
+      } else {
+        result[x].first.dump();
+      }
     }
   }
+
   return 0;
 }
+
+std::vector<std::vector<mlir::Operation*>> sliceFunctions(ModuleOp moduleOp){
+    std::unordered_set<mlir::Operation *> visited;
+    std::vector<mlir::Operation *> tmp;
+    std::vector<std::vector<mlir::Operation *>> data;
+    int combOpCnt = 0;
+
+    for (auto bit = moduleOp.getRegion().begin();
+         bit != moduleOp.getRegion().end(); ++bit) {
+      if (!bit->empty()) {
+        for (auto iit = bit->begin(); iit != bit->end(); ++iit) {
+          if (llvm::isa<circt::hw::HWModuleOp>(*iit) ||
+              llvm::isa<circt::arc::DefineOp>(*iit)) {
+            int argDepth = depth;
+            iit->walk([&visited, &data, &tmp, &combOpCnt,
+                       &argDepth](mlir::Operation *op) {
+              if (isComb(op)) {
+                ++combOpCnt;
+                if (visited.find(op) == visited.end()) {
+                  visit(op, tmp, visited, argDepth);
+                }
+                // We also consider DAGs with 1 operations
+                if (tmp.size()) {
+                  data.push_back(tmp);
+                }
+                tmp.clear();
+                // We clean visited to don't filter out operations
+                visited.clear();
+              }
+            });
+          }
+        }
+      }
+    }
+    llvm::errs() << "Sliced functions: " << data.size() << "\n";
+    llvm::errs() << "Number of comb operations: " << combOpCnt << "\n";
+    return data;
+}
+
+std::vector<std::vector<mlir::Operation*>> extractFunctions(ModuleOp moduleOp){
+  std::unordered_set<mlir::Operation *> visited;
+  std::vector<mlir::Operation *> tmp;
+  std::vector<std::vector<mlir::Operation *>> data;
+  int combOpCnt = 0;
+
+  for (auto bit = moduleOp.getRegion().begin();
+       bit != moduleOp.getRegion().end(); ++bit) {
+    if (!bit->empty()) {
+      for (auto iit = bit->begin(); iit != bit->end(); ++iit) {
+        if (llvm::isa<circt::hw::HWModuleOp>(*iit) ||
+            llvm::isa<circt::arc::DefineOp>(*iit)) {
+          iit->walk([&visited, &data, &tmp, &combOpCnt](mlir::Operation *op) {
+            if (isComb(op)) {
+              ++combOpCnt;
+              if (visited.find(op) == visited.end()) {
+                visit(op, tmp, visited);
+              }
+              // We also consider DAGs with 1 operations
+              if (tmp.size()) {
+                data.push_back(tmp);
+              }
+              tmp.clear();
+              }
+          });
+        }
+      }
+    }
+  }
+  llvm::errs() << "Extracted functions: " << data.size() << "\n";
+  llvm::errs() << "Number of comb operations: " << combOpCnt << "\n";
+  return data;
+}
+
 
 bool isValidInputPath() {
   bool result = filesystem::status(string(filename_src)).type() ==
@@ -435,9 +453,29 @@ void visit(mlir::Operation *op, std::vector<mlir::Operation *> &tmp,
       }
     }
     tmp.push_back(op);
-    /*mlir::OpResult result = op->getResult(0);
+  }
+}
+
+void visit(mlir::Operation *op, std::vector<mlir::Operation *> &tmp,
+           std::unordered_set<mlir::Operation *> &visited) {
+  if (llvm::isa<circt::hw::ConstantOp>(op)) {
+    tmp.push_back(op);
+    return;
+  }
+  if (!isComb(op)) {
+    return;
+  }
+  if (visited.find(op) == visited.end()) {
+    visited.insert(op);
+    for (Value operand : op->getOperands()) {
+      if (Operation *producer = operand.getDefiningOp()) {
+        visit(producer, tmp, visited);
+      }
+    }
+    tmp.push_back(op);
+    mlir::OpResult result = op->getResult(0);
     for (Operation *userOp : result.getUsers()) {
       visit(userOp, tmp, visited);
-    }*/
+    }
   }
 }

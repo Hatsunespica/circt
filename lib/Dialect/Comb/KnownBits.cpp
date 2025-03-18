@@ -343,7 +343,7 @@ std::pair<long long,long long> analyzeModule(ModuleOp moduleOp, bool debug){
     MLIRContext& context=*moduleOp.getContext();
     long long totalSize=0,totalUnknown=0;
     for(auto& op:moduleOp.getBodyRegion().front().getOperations()){
-        if(auto funcOp=llvm::dyn_cast<func::FuncOp>(op);!funcOp.isDeclaration()){
+        if(auto funcOp=llvm::dyn_cast<func::FuncOp>(op);funcOp && !funcOp.isDeclaration()){
 
             DataFlowSolver solver;
             //dataflow::IntegerRangeAnalysis* analysis=solver.load<dataflow::IntegerRangeAnalysis>();
