@@ -268,9 +268,9 @@ if (DemandedMask.isSubsetOf(RHSKnown.One | LHSKnown.Zero))
       }
       if(dbVal.isSubsetOf(RHSKnown.One| LHSKnown.Zero)){
         //op->replaceUsesOfWith(op->getResult(0), op->getOperand(1));
-        op->dump();
+        //op->dump();
         op->getResult(0).replaceAllUsesWith(op->getOperand(1));
-        op->getParentOp()->dump();
+        //op->getParentOp()->dump();
         llvm::errs()<<"Or3 triggered\n";
         return;
       }
