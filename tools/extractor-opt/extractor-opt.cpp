@@ -551,7 +551,10 @@ static void combBuiltInOpt(mlir::Operation* op, mlir::OpBuilder& builder, mlir::
 void runOnOperation(mlir::Operation* op, mlir::OpBuilder& builder, mlir::OpBuilder& originalOpBuilder
                     , MLIRDemandedBits<mlir::func::FuncOp,mlir::func::ReturnOp>& db
                     ,unordered_map<mlir::Operation*, mlir::Operation*>& copyToOrigin){
-
+  replaceConstantKB(op, builder, originalOpBuilder, db, copyToOrigin);
+  replaceConstantDB(op, builder, originalOpBuilder, db, copyToOrigin);
+  combBuiltInOpt(op, builder, originalOpBuilder, db, copyToOrigin);
+  replaceBitwiseBDCE(op, builder, originalOpBuilder, db, copyToOrigin);
   instCombineSimplifyDB(op, builder, originalOpBuilder, db, copyToOrigin);
 }
 
